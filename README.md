@@ -1,10 +1,20 @@
 # gmod-reshade
 
-ReShade add-on for Garry's Mod that injects `render.DrawReShadeEffects()` into the client Lua state.
+ReShade add-on for Garry's Mod that injects a Lua function to draw effects at will.
+It also by default suppresses ReShade's automatic effect pass at the end of the current frame. This can be toggled in the ReShade's add-on settings.
+Combined with the bundled Lua addon, it will make ReShade effects draw in the [RenderScreenspaceEffects hook](https://wiki.facepunch.com/gmod/GM:RenderScreenspaceEffects), before any UI is drawn.
 
-The function renders all currently enabled ReShade effects at the point where Lua calls it. ReShade's `effect_runtime::render_effects` also marks the effects as rendered for the current frame, so the normal presentation pass does not render them again over the game UI.
+## Installation
 
-By default, the add-on also suppresses ReShade's automatic end-of-frame effect pass. This prevents effects from appearing in the main menu or any other frame where `render.DrawReShadeEffects()` is unavailable or was not called. The behavior can be disabled in the add-on settings with `Only render effects from render.DrawReShadeEffects()` and is stored as `BlockAutomaticEffectRendering` in the `[GModReShade]` section of `ReShade.ini`.
+Download `gmod_reshade.zip` from latest release, unpack to your `steamapps/GarrysMod` folder.
+Make sure the `gmod_reshade.addon32` or `gmod_reshade.addon64` is next to your ReShade DLL (d3d9.dll/dxgi.dll) and the Lua addon is installed to the correct location (`steamapps/GarrysMod/garrysmod/addons/`)
+
+## Usage
+
+Accompanied [Lua addon](addons/pp_reshade/) handles ReShade compatibility automatically.
+How to toggle: `Spawnmenu` -> `Post Process` -> `Shaders` -> `ReShade` (enabled by default)
+
+If, for some reason, you need to draw them manually, use the `render.DrawReShadeEffects()` function. It is not present in the very first Lua state (autorun) so make sure to check for it's existence first (example is in the addon linked above.)
 
 ## Build
 
@@ -21,17 +31,3 @@ cmake --build build-x86 --config Release
 ```
 
 The resulting files are `gmod_reshade.addon64` and `gmod_reshade.addon32`. Copy the file matching the Garry's Mod architecture next to the ReShade DLL.
-
-## Usage
-
-Call the function from a client render hook before drawing UI that should stay unaffected by ReShade:
-
-```lua
-hook.Add("RenderScreenspaceEffects", "DrawReShadeEffectsBeforeUI", function()
-    if render.DrawReShadeEffects then
-        render.DrawReShadeEffects()
-    end
-end)
-```
-
-The guard covers the first startup frame if the client Lua state is created after ReShade initializes its effect runtime. The add-on preserves the graphics state tracked by the ReShade API after rendering the effects. On D3D11.1 it additionally preserves constant-buffer ranges set through `*SetConstantBuffers1`, which ReShade 6.8's internal state block otherwise resets. Its state tracker uses an add-on-specific private-data identifier, so it can coexist with add-ons such as ReShade Effect Shader Toggler that include their own copy of ReShade's state-tracking utility. Calling the function more than once during one frame is safe because ReShade ignores subsequent calls until the next presentation.
