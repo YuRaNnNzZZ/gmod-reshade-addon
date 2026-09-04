@@ -38,7 +38,7 @@ The resulting files are `gmod_reshade.addon64` and `gmod_reshade.addon32`. Copy 
 
 ## Disclaimer
 
-AI/LLM is used for creation of this project: the C++ code and GitHub Actions workflow.
+AI/LLM is used for creation of this project: the C++ code and GitHub Actions workflow. The "Build" section above is also written by an LLM.
 
 Lua code is written by me, because no LLM can come up with this schizo-tier code.
 
