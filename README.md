@@ -4,11 +4,15 @@ ReShade add-on for Garry's Mod that injects `render.DrawReShadeEffects()` into t
 
 The function renders all currently enabled ReShade effects at the point where Lua calls it. ReShade's `effect_runtime::render_effects` also marks the effects as rendered for the current frame, so the normal presentation pass does not render them again over the game UI.
 
+By default, the add-on also suppresses ReShade's automatic end-of-frame effect pass. This prevents effects from appearing in the main menu or any other frame where `render.DrawReShadeEffects()` is unavailable or was not called. The behavior can be disabled in the add-on settings with `Only render effects from render.DrawReShadeEffects()` and is stored as `BlockAutomaticEffectRendering` in the `[GModReShade]` section of `ReShade.ini`.
+
 ## Build
 
 The repository contains ReShade and `gmod-module-base` as submodules. Configure and build each architecture with Visual Studio:
 
 ```powershell
+git submodule update --init --recursive
+
 cmake -S . -B build-x64 -A x64
 cmake --build build-x64 --config Release
 

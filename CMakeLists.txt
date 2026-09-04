@@ -14,11 +14,13 @@ add_library(gmod_reshade SHARED
 
 target_compile_features(gmod_reshade PRIVATE cxx_std_17)
 target_compile_definitions(gmod_reshade PRIVATE
+    ImTextureID=ImU64
     NOMINMAX
     WIN32_LEAN_AND_MEAN
 )
 target_include_directories(gmod_reshade PRIVATE
     gmod-module-base/include
+    reshade/deps/imgui
     reshade/include
 )
 

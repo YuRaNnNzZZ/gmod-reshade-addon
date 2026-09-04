@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <GarrysMod/Lua/Interface.h>
+#include <imgui.h>
 #include <reshade.hpp>
 
 #include "d3d11_constant_buffer_state.hpp"
@@ -21,6 +22,8 @@ using reshade::api::resource;
 using reshade::api::resource_view;
 
 constexpr unsigned char lua_client_realm = 0;
+constexpr char config_section[] = "GModReShade";
+constexpr char block_automatic_rendering_key[] = "BlockAutomaticEffectRendering";
 
 class lua_shared_interface
 {
@@ -38,6 +41,7 @@ using create_interface = void *(*)(const char *name, int *return_code);
 
 std::atomic<effect_runtime *> s_runtime = nullptr;
 std::atomic<ILuaBase *> s_injected_lua = nullptr;
+std::atomic_bool s_block_automatic_rendering = true;
 
 struct __declspec(uuid("78019D35-AB48-4578-BF83-A0BEA7A01A07")) runtime_data
 {
@@ -211,11 +215,19 @@ void remove_lua_function()
 	lua->Pop(lua->Top() - stack_top);
 }
 
+void suppress_automatic_effect_rendering(effect_runtime *runtime, command_list *cmd_list)
+{
+	if (s_block_automatic_rendering.load(std::memory_order_acquire))
+		runtime->render_effects(cmd_list, {}, {});
+}
+
 void on_init_effect_runtime(effect_runtime *runtime)
 {
 	create_runtime_data(runtime);
 	s_runtime.store(runtime, std::memory_order_release);
 	inject_lua_function();
+	suppress_automatic_effect_rendering(
+		runtime, runtime->get_command_queue()->get_immediate_command_list());
 }
 
 void on_destroy_effect_runtime(effect_runtime *runtime)
@@ -230,28 +242,67 @@ void on_reshade_present(effect_runtime *runtime)
 	s_runtime.store(runtime, std::memory_order_release);
 	inject_lua_function();
 }
+
+void on_present(
+	reshade::api::command_queue *queue,
+	reshade::api::swapchain *,
+	const reshade::api::rect *,
+	const reshade::api::rect *,
+	uint32_t,
+	const reshade::api::rect *)
+{
+	effect_runtime *const runtime = s_runtime.load(std::memory_order_acquire);
+	if (runtime == nullptr || runtime->get_device() != queue->get_device())
+		return;
+
+	suppress_automatic_effect_rendering(runtime, queue->get_immediate_command_list());
+}
+
+void draw_settings(effect_runtime *)
+{
+	bool block_automatic_rendering = s_block_automatic_rendering.load(std::memory_order_acquire);
+	if (ImGui::Checkbox("Only render effects from render.DrawReShadeEffects()", &block_automatic_rendering))
+	{
+		s_block_automatic_rendering.store(block_automatic_rendering, std::memory_order_release);
+		reshade::set_config_value(
+			nullptr, config_section, block_automatic_rendering_key, block_automatic_rendering);
+	}
+
+	ImGui::TextWrapped(
+		"When enabled, the normal end-of-frame ReShade effect pass is suppressed. "
+		"Effects are only rendered in frames where client Lua calls render.DrawReShadeEffects().");
+}
 }
 
 extern "C" __declspec(dllexport) const char *NAME = "Garry's Mod ReShade Effects";
 extern "C" __declspec(dllexport) const char *DESCRIPTION =
-	"Adds render.DrawReShadeEffects() to client Lua so enabled ReShade effects can be rendered before the game UI.";
+	"Adds render.DrawReShadeEffects() to client Lua and optionally suppresses automatic end-of-frame effect rendering.";
 
 extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module, HMODULE reshade_module)
 {
 	if (!reshade::register_addon(addon_module, reshade_module))
 		return false;
 
+	bool block_automatic_rendering = true;
+	reshade::get_config_value(
+		nullptr, config_section, block_automatic_rendering_key, block_automatic_rendering);
+	s_block_automatic_rendering.store(block_automatic_rendering, std::memory_order_release);
+
 	render_state_tracking::register_events();
 	reshade::register_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
 	reshade::register_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_effect_runtime);
+	reshade::register_event<reshade::addon_event::present>(on_present);
 	reshade::register_event<reshade::addon_event::reshade_present>(on_reshade_present);
+	reshade::register_overlay(nullptr, draw_settings);
 	inject_lua_function();
 	return true;
 }
 
 extern "C" __declspec(dllexport) void AddonUninit(HMODULE addon_module, HMODULE reshade_module)
 {
+	reshade::unregister_overlay(nullptr, draw_settings);
 	reshade::unregister_event<reshade::addon_event::reshade_present>(on_reshade_present);
+	reshade::unregister_event<reshade::addon_event::present>(on_present);
 	reshade::unregister_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_effect_runtime);
 	reshade::unregister_event<reshade::addon_event::init_effect_runtime>(on_init_effect_runtime);
 	render_state_tracking::unregister_events();
