@@ -180,8 +180,6 @@ void inject_lua_function()
 		lua->PushCFunction(draw_reshade_effects);
 		lua->SetField(-2, "DrawReShadeEffects");
 		s_injected_lua.store(lua, std::memory_order_release);
-		reshade::log::message(reshade::log::level::info,
-			"Registered render.DrawReShadeEffects in the Garry's Mod client Lua state.");
 	}
 
 	lua->Pop(lua->Top() - stack_top);
