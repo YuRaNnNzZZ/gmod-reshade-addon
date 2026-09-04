@@ -1,0 +1,104 @@
+name: Build and package
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Configure x86
+        run: cmake -S . -B build-x86 -A Win32
+
+      - name: Build x86
+        run: cmake --build build-x86 --config Release --parallel
+
+      - name: Configure x64
+        run: cmake -S . -B build-x64 -A x64
+
+      - name: Build x64
+        run: cmake --build build-x64 --config Release --parallel
+
+      - name: Create package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $stage = Join-Path $PWD "package/root"
+          $addon = Join-Path $stage "garrysmod/addons/pp_reshade"
+
+          New-Item -ItemType Directory -Path (Join-Path $stage "bin/win64") -Force | Out-Null
+          New-Item -ItemType Directory -Path $addon -Force | Out-Null
+
+          Copy-Item -LiteralPath "build-x86/Release/gmod_reshade.addon32" -Destination (Join-Path $stage "bin/gmod_reshade.addon32")
+          Copy-Item -LiteralPath "build-x64/Release/gmod_reshade.addon64" -Destination (Join-Path $stage "bin/win64/gmod_reshade.addon64")
+          Copy-Item -Path "addons/pp_reshade/*" -Destination $addon -Recurse
+
+          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath "package/gmod-reshade.zip"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          path: package/gmod-reshade.zip
+          if-no-files-found: error
+          archive: false
+
+  release:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@v8
+        with:
+          name: gmod-reshade.zip
+          path: release
+          skip-decompress: true
+
+      - name: Create checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $zip = Resolve-Path -LiteralPath "release/gmod-reshade.zip"
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          "$hash  gmod-reshade.zip" | Set-Content -LiteralPath "release/gmod-reshade.zip.sha256" -Encoding ascii
+
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Package SHA-256: ``$hash``"
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $commitUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/commit/$env:GITHUB_SHA"
+          $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $notes = "Built from commit [$env:GITHUB_SHA]($commitUrl) by [workflow run $env:GITHUB_RUN_ID]($runUrl)."
+
+          gh release create $env:GITHUB_REF_NAME `
+            "release/gmod-reshade.zip#Ready-to-install package" `
+            "release/gmod-reshade.zip.sha256#SHA-256 checksum" `
+            --verify-tag `
+            --generate-notes `
+            --title $env:GITHUB_REF_NAME `
+            --notes $notes
