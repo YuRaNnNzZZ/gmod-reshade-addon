@@ -39,22 +39,31 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $stage = Join-Path $PWD "package/root"
-          $addon = Join-Path $stage "garrysmod/addons/pp_reshade"
+          $binaryStage = Join-Path $PWD "package/binary-root"
+          $addonStage = Join-Path $PWD "package/addon-root"
+          $addon = Join-Path $addonStage "pp_reshade"
 
-          New-Item -ItemType Directory -Path (Join-Path $stage "bin/win64") -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $binaryStage "bin/win64") -Force | Out-Null
           New-Item -ItemType Directory -Path $addon -Force | Out-Null
 
-          Copy-Item -LiteralPath "build-x86/Release/gmod_reshade.addon32" -Destination (Join-Path $stage "bin/gmod_reshade.addon32")
-          Copy-Item -LiteralPath "build-x64/Release/gmod_reshade.addon64" -Destination (Join-Path $stage "bin/win64/gmod_reshade.addon64")
+          Copy-Item -LiteralPath "build-x86/Release/gmod_reshade.addon32" -Destination (Join-Path $binaryStage "bin/gmod_reshade.addon32")
+          Copy-Item -LiteralPath "build-x64/Release/gmod_reshade.addon64" -Destination (Join-Path $binaryStage "bin/win64/gmod_reshade.addon64")
           Copy-Item -Path "addons/pp_reshade/*" -Destination $addon -Recurse
 
-          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath "package/gmod-reshade.zip"
+          Compress-Archive -Path (Join-Path $binaryStage "*") -DestinationPath "package/gmod-reshade.zip"
+          Compress-Archive -Path (Join-Path $addonStage "*") -DestinationPath "package/pp_reshade.zip"
 
-      - name: Upload package
+      - name: Upload binary package
         uses: actions/upload-artifact@v7
         with:
           path: package/gmod-reshade.zip
+          if-no-files-found: error
+          archive: false
+
+      - name: Upload Lua add-on package
+        uses: actions/upload-artifact@v7
+        with:
+          path: package/pp_reshade.zip
           if-no-files-found: error
           archive: false
 
@@ -73,16 +82,27 @@ jobs:
           path: release
           skip-decompress: true
 
-      - name: Create checksum
+      - name: Download Lua add-on package
+        uses: actions/download-artifact@v8
+        with:
+          name: pp_reshade.zip
+          path: release
+          skip-decompress: true
+
+      - name: Create checksums
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $zip = Resolve-Path -LiteralPath "release/gmod-reshade.zip"
-          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
-          "$hash  gmod-reshade.zip" | Set-Content -LiteralPath "release/gmod-reshade.zip.sha256" -Encoding ascii
+          $files = @("gmod-reshade.zip", "pp_reshade.zip")
+          $checksums = foreach ($file in $files) {
+            $hash = (Get-FileHash -LiteralPath "release/$file" -Algorithm SHA256).Hash
+            "$hash  $file"
+          }
 
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Package SHA-256: ``$hash``"
+          $checksums | Set-Content -LiteralPath "release/SHA256SUMS.txt" -Encoding ascii
+          $summary = "Package SHA-256 checksums:`n" + ($checksums -join "`n")
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
 
       - name: Publish GitHub release
         shell: pwsh
@@ -96,8 +116,9 @@ jobs:
           $notes = "Built from commit [$env:GITHUB_SHA]($commitUrl) by [workflow run $env:GITHUB_RUN_ID]($runUrl)."
 
           gh release create $env:GITHUB_REF_NAME `
-            "release/gmod-reshade.zip#Ready-to-install package" `
-            "release/gmod-reshade.zip.sha256#SHA-256 checksum" `
+            "release/gmod-reshade.zip#ReShade add-on" `
+            "release/pp_reshade.zip#Integration addon" `
+            "release/SHA256SUMS.txt#SHA-256 checksums" `
             --verify-tag `
             --generate-notes `
             --title $env:GITHUB_REF_NAME `
